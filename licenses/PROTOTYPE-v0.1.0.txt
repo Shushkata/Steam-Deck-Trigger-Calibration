@@ -1,0 +1,2 @@
+This Decky wrapper source is provided for personal evaluation, without warranty.
+The original third-party calibration utility is not included and retains its own licensing and attribution.

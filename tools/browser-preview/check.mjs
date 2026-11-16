@@ -1,0 +1,71 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import {createRequire} from 'node:module';
+import path from 'node:path';
+const require=createRequire(import.meta.url);
+const {chromium}=require('playwright');
+const root=path.resolve('../..');
+const output=path.resolve(process.env.UI_PREVIEW_OUTPUT || '.preview-output');
+const baseline=process.env.UI_BASELINE_BUNDLE || path.resolve('old-plugin.js');
+fs.mkdirSync(output,{recursive:true});
+const html='<!doctype html><meta charset="utf-8"><style>body{background:#18212c;color:#eef1f4;font:14px Arial;margin:12px}#app{max-width:340px}h2{font-size:17px}section{padding:10px 0;border-bottom:1px solid #555}.row{padding:6px 0;width:100%}input[type=range]{display:block;width:100%;height:30px}button{padding:10px;width:100%}.slider{display:block;width:100%}aside{font-size:11px;color:#bcc6cc}</style><aside>Browser test with synthetic data and DOM stand-ins; NOT native SteamUI.</aside><div id="app"></div><script>window.process={env:{NODE_ENV:"production"}}</script><script type="module" src="/preview.js"></script>';
+const server=http.createServer((request,response)=>{
+  const url=new URL(request.url,'http://localhost');
+  response.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':'text/html');
+  response.end(url.pathname==='/plugin-old.js'?fs.readFileSync(baseline):url.pathname==='/plugin.js'?fs.readFileSync(path.join(root,'dist/index.js')):
+    url.pathname==='/preview.js'?fs.readFileSync('preview.js'):html);
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+let browser;
+const report={runtime:'Chromium/Edge with real React 19.1.1; Decky components are DOM stand-ins',cases:[]};
+try {
+  browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined});
+  const page=await browser.newPage({viewport:{width:390,height:900},hasTouch:true});
+  const errors=[];page.on('pageerror',error=>errors.push(String(error)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  if(fs.existsSync(baseline)) {
+    await page.goto(base+'/?baseline');
+    await page.waitForFunction(()=>document.body.innerText.includes('Current Calibration: LT 1611'));
+    const count=await page.locator('input[type=range]').count();
+    if(count!==0)throw Error('The original missing-windows render gate was not reproduced');
+    report.baseline={version:'0.3.0-hwtest.1',fixture:'Valid current/initial/selected; windows absent',sliders:count,trigger_test_button:await page.getByRole('button',{name:'Open Trigger Test',exact:true}).count()};
+  }
+  await page.goto(base);await page.getByLabel('Adjust LT MAX',{exact:true}).waitFor({state:'visible'});
+  const sliders=page.locator('input[type=range]');
+  if(await sliders.count()!==2)throw Error('Two sliders not rendered');
+  if(!await page.getByRole('button',{name:'Apply',exact:true}).isDisabled())throw Error('Apply should be disabled in fixture');
+  await page.getByLabel('Adjust LT MAX',{exact:true}).focus();await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(()=>window.rpcCalls.some(row=>row.route==='select_values'));
+  const selected=await page.evaluate(()=>window.rpcCalls.filter(row=>row.route==='select_values').at(-1).args);
+  if(selected[0]!==1631||selected[1]!==1647)throw Error(`Unexpected selection ${selected}`);
+  const rt=page.getByLabel('Adjust RT MAX',{exact:true});
+  const bounds=await rt.boundingBox();await page.touchscreen.tap(bounds.x+bounds.width*.4,bounds.y+bounds.height*.5);
+  await page.waitForTimeout(100);
+  const touched=await page.evaluate(()=>window.rpcCalls.filter(row=>row.route==='select_values').at(-1).args);
+  if(touched[0]!==1631 || touched[1]===1647)throw Error('Touch did not independently change RT');
+  if(await page.evaluate(()=>window.rpcCalls.some(row=>row.route==='apply_selected')))throw Error('Slider wrote hardware');
+  await page.screenshot({path:path.join(output,'UI_BROWSER_PREVIEW.png'),fullPage:true});
+  report.cases.push({state:'Valid calibration, windows absent, Apply disabled',sliders:2,keyboard:true,touch_hit_test:true,hardware_apply_calls:0});
+  await page.getByRole('button',{name:'Open Trigger Test',exact:true}).click();
+  await page.getByRole('progressbar').first().waitFor({state:'visible'});
+  if(await sliders.count()!==2)throw Error('Trigger Test hid sliders');
+  report.cases.push({state:'Calibration Settings and Trigger Test together',sliders:2,input_bars:await page.getByRole('progressbar').count()});
+  await page.screenshot({path:path.join(output,'UI_BROWSER_PREVIEW.png'),fullPage:true});
+  await page.goto(base+'/?no-backup');await page.getByLabel('Adjust LT MAX',{exact:true}).waitFor({state:'visible'});
+  if(await sliders.count()!==2)throw Error('Missing backup hid sliders');
+  report.cases.push({state:'Missing initial backup',sliders:2,visible_error:await page.getByRole('alert').count()>0});
+  await page.goto(base+'/?error');await page.getByText('Synthetic calibration read failure',{exact:true}).waitFor();
+  if(await page.getByRole('heading',{name:'Calibration Settings',exact:true}).count()!==1)throw Error('Error hid section');
+  report.cases.push({state:'Read failure',section_visible:true,visible_error:true,sliders:await sliders.count()});
+  await page.goto(base+'/?writable');
+  await page.getByLabel('Adjust LT MAX',{exact:true}).waitFor({state:'visible'});
+  if(await page.getByRole('button',{name:'Apply',exact:true}).isDisabled())throw Error('Healthy backend left Apply locked');
+  await page.getByRole('button',{name:'Open Trigger Test',exact:true}).click();
+  await page.getByRole('progressbar').first().waitFor({state:'visible'});
+  await page.screenshot({path:path.join(output,'UI_BROWSER_PREVIEW.png'),fullPage:true});
+  report.cases.push({state:'Healthy backend: Apply enabled alongside both sliders and live indicators',sliders:2,input_bars:2,hardware_test:false});
+  if(errors.length)throw Error(errors.join('\n'));
+  report.browser_errors=errors;report.passed=true;
+  fs.writeFileSync(path.join(output,'BROWSER_CHECK.json'),JSON.stringify(report,null,2));
+  console.log(JSON.stringify(report,null,2));
+} finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

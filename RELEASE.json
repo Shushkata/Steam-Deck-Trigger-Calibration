@@ -1,0 +1,73 @@
+{
+  "version": "0.3.7",
+  "release_kind": "permanent-original-backup-protection",
+  "based_on": "0.3.6",
+  "hardware_tested": false,
+  "general_release_write_certified": false,
+  "physical_setter_implemented": true,
+  "physical_write_path": "Manual Apply/Restore through independent worker with read-back",
+  "independent_apply_worker_implemented": true,
+  "independent_120s_watchdog_implemented": false,
+  "automatic_application": false,
+  "production_boot_resume_hooks_implemented": false,
+  "ui_language": "English",
+  "stable_plugin_directory": "DeckyTriggerCalibration",
+  "hardware_read_user_report": {
+    "version": "0.2.0-validation.1",
+    "model": "Steam Deck LCD",
+    "startup": true,
+    "both_numeric_values_visible": true,
+    "approximate_values": "Personal calibration values omitted from public source",
+    "exact_values_verified": false,
+    "new_hardware_apply_verified": false,
+    "new_live_input_verified": false,
+    "live_input_0_3_0_user_report": "Steam Deck LCD: Live Trigger Test reacts to LT/RT; calibration sliders missing."
+  },
+  "input_semantics": "Actual HID report values and documented report-axis scale; Steam Input equivalence, sensor/calibration mode and unwanted-input noise threshold are unverified. Idle result is Inconclusive.",
+  "python_runtime_dependencies": [
+    "Python standard library",
+    "Decky-provided decky module",
+    "SteamOS /usr/bin/python3 when Decky is a frozen executable"
+  ],
+  "not_implemented": [
+    "Steam restart Apply path",
+    "Desktop GUI fallback",
+    "Certified 120-second automatic rollback"
+  ],
+  "remaining_hardware_tests": [
+    "0.3.7 redundant backup/export and initial-screen behavior on the user Steam Deck LCD"
+  ],
+  "ui_only_change": false,
+  "trigger_test_logic_unchanged": true,
+  "user_confirmed_initial_recovery": true,
+  "caution_reference": 1820,
+  "previous_release_hardware_user_report": {
+    "version": "0.3.3",
+    "model": "Steam Deck LCD",
+    "confirmed_working": [
+      "Read Calibration",
+      "Set Current as Default",
+      "LT/RT sliders",
+      "Hardware Apply",
+      "Restore Default",
+      "Live Trigger Test"
+    ],
+    "reported_issue": "Temporary loss of frontend calibration values after Apply; manual Read restores them."
+  },
+  "original_archive_create_only": true,
+  "slider_endpoint": 1880,
+  "input_monitoring": "Explicit Open Trigger Test only; stop on Close/unmount, lease expiry fallback",
+  "hid_reader_unchanged": true,
+  "redundant_original_backup": true,
+  "original_backup_export": true,
+  "selected_values_independent_of_read_and_restore": true,
+  "initial_ui": "Explicit Read Calibration before displaying controls; emergency Original Restore remains available",
+  "user_reported_persistence": {
+    "device": "Steam Deck LCD",
+    "restart": "Applied hardware calibration retained",
+    "sleep_resume": "Applied hardware calibration retained",
+    "full_shutdown": "Modified hardware calibration resets",
+    "cold_start": "Read shows controller-restored Current; Selected remains saved",
+    "implementation": "Reported device behavior is preserved; no Boot/Resume application is added."
+  }
+}

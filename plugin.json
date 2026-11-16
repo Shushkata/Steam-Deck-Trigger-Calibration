@@ -1,0 +1,8 @@
+{
+  "name": "Trigger Calibration",
+  "author": "Trigger Calibration contributors",
+  "flags": [
+    "root"
+  ],
+  "api_version": 1
+}
