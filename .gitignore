@@ -72,6 +72,7 @@ diagnostics/
 !/docs/REPORT_037_BG.md
 !/docs/FIRST_TEST_037_BG.md
 !/docs/GIT_WORKFLOW.md
+!/docs/TECHNICAL.md
 
 # Credentials and local configuration (never put secrets in Git URLs)
 .env
