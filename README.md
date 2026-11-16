@@ -1,5 +1,13 @@
 # Trigger Calibration 0.3.7
 
+Trigger Calibration is a Decky Loader plugin for Steam Deck that reads LT/RT
+calibration, lets you adjust each trigger's MAX value, applies changes with
+verified hardware read-back, and restores a locked Original Calibration backup.
+The built-in Live Trigger Test shows both analog inputs, idle behavior and
+measured minimum/maximum values. Selected settings are saved separately from
+Current and Original Calibration. Calibration changes are experimental; adjust
+carefully and keep an exported Original Backup on another device.
+
 Continues the working 0.3.6 version. The native hardware adapter, independent
 Apply/Restore worker, HID protocol, calibration core, Trigger Test reader and
 slider components are unchanged. No Boot/Resume application or new background
@@ -93,9 +101,33 @@ runs continuously after the test is closed.
 
 ## Install and verification
 
-Install `Trigger_Calibration_0.3.7_INSTALL.zip` with Decky. Keep the stable plugin
-folder DeckyTriggerCalibration and its settings. Do not delete or recreate backups
-when updating. No user calibration data is shipped in the ZIPs.
+Decky Loader must already be installed on the Steam Deck.
+
+1. Copy the compiled `Trigger_Calibration_0.3.7_INSTALL.zip` to the Deck. Use the
+   supplied install archive or build it from this source as described below.
+   GitHub's automatic source archive and the SOURCE ZIP are not installable plugins.
+2. In Gaming Mode, open the Quick Access Menu (`...`), select Decky and open its
+   settings using the gear icon.
+3. Enable **Developer mode** in Decky's **General** settings if needed, then open
+   the **Developer** page.
+4. Under **Install Plugin from ZIP File**, choose **Browse**, select the INSTALL
+   ZIP and confirm installation. Do not unzip it into a second nested plugin folder.
+5. Reload the plugin through Decky, or restart Gaming Mode if it does not appear.
+   Open **Trigger Calibration** and choose **Read Calibration**.
+6. On a new setup, follow the explicit Original capture confirmation and export
+   the backup. On an update, retain the existing Original; never recapture it from
+   an already modified Current calibration.
+
+Keep the stable plugin folder `DeckyTriggerCalibration` and its separate settings.
+Do not delete or recreate backups when updating. No user calibration data is
+shipped in the ZIPs.
+
+**Full Shutdown limitation:** the user reports that Restart and Sleep/Resume keep
+the applied calibration on Steam Deck LCD, while a complete Shutdown clears the
+modified hardware calibration. Selected settings and Original backups remain
+saved. After powering on, use **Read Calibration** and explicitly **Apply** the
+saved selection again if desired. There is no automatic Boot/Resume Apply, and
+controller-restored values are not presented as guaranteed factory calibration.
 
 Local tests cover immutable independent copies, damaged-copy fallback, conflicting
 copies, export, update migration, hardware-write regression paths, Selected through
@@ -104,10 +136,30 @@ SteamUI/touch/gamepad and physical behavior of 0.3.7 still need device confirmat
 local hardware tests substitute transport and do not certify a new protocol.
 
 Build: pnpm install --frozen-lockfile; pnpm run typecheck; pnpm run build.
-Package: python tools/package.py --output <directory> --baseline <0.3.6 SOURCE.zip>.
+Package: python tools/package.py --output <directory>.
+If you have the previous SOURCE archive, optionally add
+`--baseline <0.3.6 SOURCE.zip>` to verify that protected hardware paths are unchanged.
 Packaging compares the unchanged hardware files and RPC paths. Restore is allowed
 only its intentional removal of Selected-preference replacement; native hardware
 steps must remain identical. Short report: docs/REPORT_037_BG.md.
+
+## Credits and licenses
+
+Credit to **kasandravtv (kasvtv)**, author of the original
+[Steam Deck Trigger Calibration Overwriting Tool](https://github.com/kasandravtv/steam_deck_overwrite_trigger_cal),
+for the calibration research and workflow that informed this project. The original
+utility is a research reference; its executable, extracted Valve libraries and
+upstream utility source are not bundled or required by this plugin's native reader.
+
+Thanks also to SteamDeckHomebrew for Decky Loader, its plugin template and API/UI
+libraries, and to the additional projects credited in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+[LICENSE](LICENSE) applies BSD-3-Clause to the newly authored implementation
+material while preserving the supplied prototype notice. Third-party components
+retain their own terms, including LGPL-2.1 for Decky API/UI and the MIT/BSD notices
+stored in [licenses/](licenses/). Bundled Decky API source and package metadata are
+included there to support rebuilding; no third-party code is relicensed as BSD.
 
 ## Source control
 
