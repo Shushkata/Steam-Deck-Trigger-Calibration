@@ -10,7 +10,7 @@ import uuid
 import zipfile
 from trigger_engine import CalibrationError
 
-VERSION = '0.3.7'
+VERSION = '0.3.8'
 
 
 def sanitize(value):

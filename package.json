@@ -1,6 +1,6 @@
 {
   "name": "decky-trigger-calibration",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Locked redundant Original backups, export, persistent Selected values and clean initial screen",
   "private": true,
   "type": "module",

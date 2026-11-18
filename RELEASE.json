@@ -1,7 +1,7 @@
 {
-  "version": "0.3.7",
-  "release_kind": "permanent-original-backup-protection",
-  "based_on": "0.3.6",
+  "version": "0.3.8",
+  "release_kind": "post-apply-ui-reset-fix",
+  "based_on": "0.3.7",
   "hardware_tested": false,
   "general_release_write_certified": false,
   "physical_setter_implemented": true,
@@ -35,7 +35,7 @@
     "Certified 120-second automatic rollback"
   ],
   "remaining_hardware_tests": [
-    "0.3.7 redundant backup/export and initial-screen behavior on the user Steam Deck LCD"
+    "0.3.8 confirmation remount: Read, Apply twice, Trigger Test, Restore Original on Steam Deck LCD"
   ],
   "ui_only_change": false,
   "trigger_test_logic_unchanged": true,

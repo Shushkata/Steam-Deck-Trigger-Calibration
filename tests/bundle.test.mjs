@@ -13,9 +13,9 @@ const defaultState={ok:true,current,initial:{values:current,provenance:'Initial 
 
 function harness(initial=defaultState,nativeSliderAvailable=true,respond) {
   let backend=structuredClone(initial);
-  const states=[],refs=[],effectStates=[];
+  let states=[],refs=[],effectStates=[],generation=0;
   let hook=0,ref=0,effect=0,nodes=[],effects=[];
-  const calls=[],modals=[];
+  const calls=[],modals=[],modalClosures=[];
   const element=(type,props)=>({type,props:props??{}});
   const input={ok:true,token:'input-session',active:true,values:[0,32767],percent:[0,100],samples:5,stale:false,
     minimum:[0,0],maximum:[0,32767],report_range_reached:[false,true],returned_to_report_zero:[false,false]};
@@ -33,13 +33,14 @@ function harness(initial=defaultState,nativeSliderAvailable=true,respond) {
         }})}},
     SP_JSX:{jsx:element,jsxs:element,Fragment:'Fragment'},
     SP_REACT:{
-      useState:initial=>{const i=hook++;if(!(i in states))states[i]=initial;return[states[i],value=>{states[i]=value;}];},
+      useState:initial=>{const i=hook++,owner=generation,owned=states;if(!(i in owned))owned[i]=initial;return[owned[i],value=>{if(owner===generation)owned[i]=value;}];},
       useRef:initial=>{const i=ref++;return refs[i]??(refs[i]={current:initial});},
       useEffect:(fn,deps)=>{const i=effect++;const old=effectStates[i];
         if(!old||deps.some((v,n)=>v!==old.deps[n])) {effects.push(()=>{old?.cleanup?.();effectStates[i]={deps,cleanup:fn()};});}}
     },
     DFL:{ButtonItem:'ButtonItem',ConfirmModal:'ConfirmModal',PanelSection:'PanelSection',PanelSectionRow:'PanelSectionRow',
-      SliderField:nativeSliderAvailable?'SliderField':undefined,ToggleField:'ToggleField',staticClasses:{Title:'Title'},showModal:modal=>modals.push(modal)},
+      SliderField:nativeSliderAvailable?'SliderField':undefined,ToggleField:'ToggleField',staticClasses:{Title:'Title'},showModal:modal=>{
+        modals.push(modal);return {ClosedPromise:new Promise(resolve=>modalClosures.push(resolve))};}},
     console,Date
   };
   vm.createContext(sandbox);
@@ -57,9 +58,11 @@ function harness(initial=defaultState,nativeSliderAvailable=true,respond) {
     if(begin){button('Read Calibration').props.onClick();await tick();render();}}
   function button(label){return nodes.find(n=>n.type==='ButtonItem'&&n.props.children===label);}
   function text(node){if(Array.isArray(node))return node.map(text).join('');if(node&&typeof node==='object')return text(node.props?.children);return node==null||typeof node==='boolean'?'':String(node);}
-  return {plugin,calls,modals,mount,render,tick,button,get nodes(){return nodes;},
+  function destroy(){effectStates.forEach(e=>e.cleanup?.());generation++;states=[];refs=[];effectStates=[];effects=[];}
+  async function remount(){destroy();await mount(false);}
+  return {plugin,calls,modals,mount,remount,render,tick,button,get nodes(){return nodes;},
     runEffects:()=>effects.splice(0).forEach(fn=>fn()),text:()=>nodes.map(n=>text(n)).join(' '),
-    destroy:()=>effectStates.forEach(e=>e.cleanup?.())};
+    closeModal:()=>modalClosures.at(-1)?.(),destroy};
 }
 
 test('Live calibration RPC reaches rendered numerical values and saved preset',async()=>{
@@ -291,4 +294,88 @@ test('Explicit capture hides Save permanently while Read preserves archived and 
   assert.equal(h.button('Save Original Calibration'),undefined);
   assert.match(h.text(),/LT MAX: 1900/);assert.match(h.text(),/Selected MAX: 1880/);
   assert.match(h.text(),/Current MAX: 1820/);h.destroy();
+});
+
+test('Confirmation remount preserves Read -> Apply -> Adjust -> Apply -> Trigger Test -> Restore',async()=>{
+  const original={lmax:1703,lmin:611,rmax:1727,rmin:623,lneg:12,rneg:13};
+  let backend={...defaultState,current:original,initial:{values:original},selected:{lmax:1703,rmax:1727}};
+  let applies=0,finishSecond;
+  const h=harness(backend,true,async(route,args)=>{
+    if(route==='select_values')return backend={...backend,selected:{lmax:args[0],rmax:args[1]}};
+    if(route==='apply_selected'){
+      assert.deepEqual(JSON.parse(JSON.stringify(args[0])),backend.current);
+      assert.equal(args[3],true);
+      if(++applies===2)await new Promise(resolve=>finishSecond=resolve);
+      const actual={...backend.current,lmax:args[1],rmax:args[2]};
+      return backend={...backend,current:actual,message:'Calibration Applied',current_is_stale:false,
+        last_apply:{status:'verified',readback:actual},manual_apply_enabled:true};
+    }
+    if(route==='restore_default')return backend={...backend,current:original,message:'Default restored and read back.',
+      current_is_stale:false,last_apply:{status:'verified',readback:original},manual_apply_enabled:true};
+    if(['get_status','read_calibration'].includes(route))return backend;
+  });
+  await h.mount();
+  h.nodes.find(n=>n.type==='ToggleField').props.onChange(true);h.render();
+  h.nodes.find(n=>n.type==='SliderField').props.onChange(1743);await h.tick();h.render();
+  h.button('Apply').props.onClick();
+  await h.remount(); // QAM closes for the modal before the user confirms.
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,2);
+  h.modals.at(-1).props.onOK();await h.tick();h.render();
+  assert.match(h.text(),/Current MAX: 1743/);assert.match(h.text(),/Calibration Applied/);
+  assert.equal(h.nodes.find(n=>n.type==='ToggleField').props.checked,true);
+  assert.equal(h.button('Apply').props.disabled,false);
+  h.nodes.find(n=>n.type==='SliderField').props.onChange(1783);await h.tick();h.render();
+  h.button('Apply').props.onClick();h.modals.at(-1).props.onOK();await h.tick();
+  await h.remount(); // Also cover remount while the existing write RPC is pending.
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,2);
+  assert.equal(h.button('Apply').props.disabled,true);
+  finishSecond();await h.tick();h.render();
+  assert.match(h.text(),/Current MAX: 1783/);assert.match(h.text(),/Selected MAX: 1783/);
+  assert.equal(h.button('Apply').props.disabled,false);
+  assert.equal(h.calls.filter(c=>c.route==='start_input').length,0);
+  h.button('Open Trigger Test').props.onClick();h.render();h.runEffects();await h.tick();h.render();
+  assert.equal(h.nodes.filter(n=>n.props.role==='progressbar').length,2);
+  h.button('Close Trigger Test').props.onClick();h.render();h.runEffects();await h.tick();
+  h.button('Restore Original').props.onClick();await h.remount();
+  h.modals.at(-1).props.onOK();await h.tick();h.render();
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,2);
+  assert.match(h.text(),/Current MAX: 1703/);assert.match(h.text(),/Selected MAX: 1783/);
+  assert.match(h.text(),/Default: 1703/);assert.equal(h.button('Apply').props.disabled,false);
+  assert.equal(h.calls.filter(c=>c.route==='read_calibration').length,1);
+  assert.equal(h.calls.filter(c=>c.route==='get_status').length,1);
+  assert.equal(h.calls.filter(c=>c.route==='apply_selected').length,2);
+  assert.equal(h.calls.filter(c=>c.route==='stop_input').length,1);
+  await h.remount(); // An ordinary later opening keeps the existing initial screen.
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,0);h.destroy();
+});
+
+test('Confirmation remount retains Last Read and selections on unverified or disconnected Apply',async()=>{
+  for(const disconnect of [false,true]){
+    const h=harness(defaultState,true,route=>{
+      if(route==='apply_selected'){
+        if(disconnect)throw new Error('Connection lost after write');
+        return {ok:false,error:'Calibration verification pending',current:null,initial:null,selected:null,manual_apply_enabled:false};
+      }
+    });
+    await h.mount();h.nodes.find(n=>n.type==='SliderField').props.onChange(1890);await h.tick();h.render();
+    h.button('Apply').props.onClick();await h.remount();h.modals.at(-1).props.onOK();await h.tick();h.render();
+    assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,2);
+    assert.match(h.text(),/Selected MAX: 1890/);assert.match(h.text(),/Last Read: 1900/);
+    assert.match(h.text(),/Default: 1900/);assert.equal(h.button('Apply').props.disabled,true);
+    assert.doesNotMatch(h.text(),/Calibration Applied|Read the current calibration to begin/);
+    h.button('Read Calibration').props.onClick();await h.tick();h.render();
+    assert.equal(h.button('Apply').props.disabled,false);h.destroy();
+  }
+});
+
+test('Confirmation dismissal restores the active screen without writing hardware',async()=>{
+  const h=harness();await h.mount();h.button('Apply').props.onClick();await h.remount();
+  h.closeModal();await h.tick();h.render();
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,2);
+  assert.equal(h.button('Apply').props.disabled,false);
+  assert.equal(h.calls.filter(c=>c.route==='apply_selected').length,0);
+  await h.remount();h.button('Restore Original').props.onClick();await h.remount();
+  h.closeModal();await h.tick();h.render();
+  assert.equal(h.nodes.filter(n=>n.type==='SliderField').length,0);
+  assert.equal(h.calls.filter(c=>c.route==='restore_default').length,0);h.destroy();
 });

@@ -44,22 +44,29 @@ function drainSelections() {
 }
 async function waitForSelections() { while(preferenceWork) await preferenceWork; }
 
+// Steam may unmount the QAM content while its confirmation modal is open.
+// Retain only that handoff, then consume the existing RPC reply in the new view.
+// Ordinary panel closes still start at Read; no polling or hardware read is added.
+type ConfirmationHandoff = {status:Status|null;hasRead:boolean;left:number;right:number;fine:boolean;confirmed:boolean;result:Promise<Status>};
+let confirmationHandoff:ConfirmationHandoff|null=null;
+
 export function Content() {
-  const [status,setStatus] = useState<Status|null>(null);
-  const [hasRead,setHasRead] = useState(false);
-  const [attempted,setAttempted] = useState(false);
-  const [left,setLeft] = useState(0);
-  const [right,setRight] = useState(0);
-  const [busy,setBusy] = useState(false);
-  const [fine,setFine] = useState(false);
+  const resume=confirmationHandoff;
+  const [status,setStatus] = useState<Status|null>(resume?.status ?? null);
+  const [hasRead,setHasRead] = useState(resume?.hasRead ?? false);
+  const [attempted,setAttempted] = useState(!!resume);
+  const [left,setLeft] = useState(resume?.left ?? 0);
+  const [right,setRight] = useState(resume?.right ?? 0);
+  const [busy,setBusy] = useState(!!resume);
+  const [fine,setFine] = useState(resume?.fine ?? false);
   const [diagnostics,setDiagnostics] = useState(false);
   const [saving,setSaving] = useState(false);
   const [message,setMessage] = useState('');
   const mounted = useRef(true);
   const revision = useRef(0);
-  const desired = useRef({left:0,right:0});
-  const lastStatus = useRef<Status|null>(null);
-  const busyNow = useRef(false);
+  const desired = useRef({left:resume?.left ?? 0,right:resume?.right ?? 0});
+  const lastStatus = useRef<Status|null>(resume?.status ?? null);
+  const busyNow = useRef(!!resume);
   const request = useRef(0);
 
   function accept(next:Status,synchronize=true) {
@@ -68,7 +75,7 @@ export function Content() {
     next={...previous,...next,current:next.current ?? previous?.current,
       initial:next.initial ?? previous?.initial,selected:next.selected ?? previous?.selected,
       current_is_stale:next.current_is_stale || retained,
-      manual_apply_enabled:next.manual_apply_enabled===true};
+      manual_apply_enabled:next.manual_apply_enabled===true && !retained};
     lastStatus.current=next;
     setStatus(next);
     if (synchronize) {
@@ -83,7 +90,16 @@ export function Content() {
   useEffect(()=>{
     mounted.current = true;
     const ticket=++request.current;
-    void waitForSelections().then(getStatus).then(next=>{if(mounted.current && ticket===request.current) accept(next);})
+    void waitForSelections().then(()=>resume ? resume.result : getStatus()).then(next=>{
+      if(mounted.current && ticket===request.current) {
+        accept(next);
+        if(resume) {
+          setHasRead(resume.hasRead || !!(resume.confirmed && next.ok && validProposal(next.current,next.current?.lmax ?? NaN,next.current?.rmax ?? NaN)));
+          busyNow.current=false;setBusy(false);
+          if(confirmationHandoff===resume) confirmationHandoff=null;
+        }
+      }
+    })
       .catch(error=>{if(mounted.current && ticket===request.current) {
         const message=`Calibration read failed: ${String(error)}`;
         accept({ok:false,error:message});
@@ -118,26 +134,51 @@ export function Content() {
   async function run(operation:()=>Promise<Status>,markRead=false) {
     if (busyNow.current) return;
     busyNow.current=true;
-    setAttempted(true);
+    if(mounted.current) setAttempted(true);
     const ticket=++request.current;
-    setBusy(true);
+    if(mounted.current) setBusy(true);
     try {
       await waitForSelections();
       let next=await operation();
+      if(next.current==null && lastStatus.current?.current) next={...next,
+        error:next.error || 'Calibration verification pending. Use Read Calibration.',
+        current_is_stale:true,manual_apply_enabled:false};
       const fresh=next.current && !next.current_is_stale && validProposal(next.current,next.current.lmax,next.current.rmax);
       if(markRead && !fresh && !next.error) next={...next,error:'Calibration read did not return valid current MAX/MIN values. Press Read Calibration to retry.'};
       if(mounted.current && ticket===request.current) {
         accept(next);
         if(markRead && fresh) setHasRead(true);
       }
+      return next;
     }
-    catch(error) { setMessage(String(error)); }
+    catch {
+      const failed:Status={ok:false,error:'Calibration verification pending. Use Read Calibration.',
+        current_is_stale:true,manual_apply_enabled:false};
+      if(mounted.current && ticket===request.current) accept(failed);
+      return failed;
+    }
     finally { busyNow.current=false;if(mounted.current)setBusy(false); }
   }
 
   function confirm(title:string,description:string,action:()=>Promise<Status>,button:string) {
-    showModal(<ConfirmModal strTitle={title} strDescription={description} strOKButtonText={button}
-      strCancelButtonText="Cancel" onOK={()=>void run(action)} />);
+    let resolve!:(state:Status)=>void,started=false;
+    const snapshot=lastStatus.current && hasRead ? {...lastStatus.current,
+      selected:{lmax:desired.current.left,rmax:desired.current.right}} : lastStatus.current;
+    const handoff:ConfirmationHandoff={status:snapshot,hasRead,left:desired.current.left,right:desired.current.right,fine,confirmed:false,
+      result:new Promise<Status>(done=>{resolve=done;})};
+    confirmationHandoff=handoff;
+    const finish=(state:Status)=>{
+      resolve(state);
+      if(mounted.current && confirmationHandoff===handoff) confirmationHandoff=null;
+    };
+    const cancel=()=>{if(!started)finish(snapshot ?? {ok:false});};
+    const modal=showModal(<ConfirmModal strTitle={title} strDescription={description} strOKButtonText={button}
+      strCancelButtonText="Cancel" onCancel={cancel} onOK={()=>{
+        if(started)return;
+        started=true;handoff.confirmed=true;
+        void run(action).then(next=>finish(next ?? {...snapshot,ok:false,manual_apply_enabled:false}));
+      }} />);
+    void modal?.ClosedPromise?.then(cancel,cancel);
   }
 
   const current = status?.current;
